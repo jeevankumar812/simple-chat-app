@@ -1,10 +1,12 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
+const redisClient = require("../config/redis");
 
 const router = express.Router();
 
-// Register
+/* ---------------- REGISTER ---------------- */
+
 router.post("/register", async (req, res) => {
   const { username, password } = req.body;
 
@@ -20,17 +22,33 @@ router.post("/register", async (req, res) => {
   res.json({ message: "User registered successfully" });
 });
 
-// Login
+/* ---------------- LOGIN (WITH REDIS) ---------------- */
+
 router.post("/login", async (req, res) => {
   const { username, password } = req.body;
 
+  // 1. Check Redis cache
+  const cachedUser = await redisClient.get(username);
+  if (cachedUser) {
+    return res.json(JSON.parse(cachedUser));
+  }
+
+  // 2. Check MongoDB
   const user = await User.findOne({ username });
   if (!user) return res.status(400).json({ msg: "User not found" });
 
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) return res.status(400).json({ msg: "Wrong password" });
 
-  res.json({ message: "Login successful", userId: user._id });
+  const response = {
+    message: "Login successful",
+    userId: user._id
+  };
+
+  // 3. Store result in Redis
+  await redisClient.set(username, JSON.stringify(response));
+
+  res.json(response);
 });
 
 module.exports = router;
